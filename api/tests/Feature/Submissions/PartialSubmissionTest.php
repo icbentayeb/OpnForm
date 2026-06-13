@@ -419,3 +419,72 @@ it('cannot revert a completed submission back to partial', function () {
     expect($submission->status)->toBe(FormSubmission::STATUS_COMPLETED);
     expect($submission->data[$targetField['id']])->toBe('Complete');
 });
+
+it('validates required fields when is_partial sent to form without partial submissions', function () {
+    $user = $this->actingAsBusinessUser();
+    $workspace = $this->createUserWorkspace($user);
+    $form = $this->createForm($user, $workspace, [
+        'enable_partial_submissions' => false,
+    ]);
+
+    // Make a required field to ensure validation fires
+    $properties = $form->properties;
+    $properties[0]['required'] = true;
+    $form->update(['properties' => $properties]);
+
+    // Send only is_partial with no field data — should be rejected by validation
+    $this->postJson(route('forms.answer', $form->slug), [
+        'is_partial' => true,
+    ])->assertStatus(422);
+});
+
+it('validates required fields when is_partial sent on free tier form', function () {
+    $user = $this->actingAsUser();
+    $workspace = $this->createUserWorkspace($user);
+    $form = $this->createForm($user, $workspace, [
+        'enable_partial_submissions' => true,
+    ]);
+
+    $properties = $form->properties;
+    $properties[0]['required'] = true;
+    $form->update(['properties' => $properties]);
+
+    // Free tier cannot use partial submissions, so validation should run
+    $this->postJson(route('forms.answer', $form->slug), [
+        'is_partial' => true,
+    ])->assertStatus(422);
+});
+
+it('validates required fields when is_partial is false on partial-enabled form', function () {
+    $user = $this->actingAsBusinessUser();
+    $workspace = $this->createUserWorkspace($user);
+    $form = $this->createForm($user, $workspace, [
+        'enable_partial_submissions' => true,
+    ]);
+
+    $properties = $form->properties;
+    $properties[0]['required'] = true;
+    $form->update(['properties' => $properties]);
+
+    // is_partial: false is a completed submission — required fields must be validated
+    $this->postJson(route('forms.answer', $form->slug), [
+        'is_partial' => false,
+    ])->assertStatus(422);
+});
+
+it('stores completed submission when is_partial is string false on partial-enabled form', function () {
+    $user = $this->actingAsBusinessUser();
+    $workspace = $this->createUserWorkspace($user);
+    $form = $this->createForm($user, $workspace, [
+        'enable_partial_submissions' => true,
+    ]);
+
+    $formData = $this->generateFormSubmissionData($form);
+    $formData['is_partial'] = 'false';
+
+    $this->postJson(route('forms.answer', $form->slug), $formData)
+        ->assertSuccessful();
+
+    $submission = FormSubmission::first();
+    expect($submission->status)->toBe(FormSubmission::STATUS_COMPLETED);
+});
